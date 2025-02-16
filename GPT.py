@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
-from attention import FlashAttentionBlock
 from embedding import embed_input, get_tokenized_input
 from positional_encoding import PositionalEncoding
 from decoder import GPTDecoder
+from attention import XFormersAttentionBlock
 
 class GPTBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.1, layer_id=0):
         super().__init__()
-        self.attention = FlashAttentionBlock(embed_dim, num_heads, dropout, layer_id)
+        self.attention = XFormersAttentionBlock(embed_dim, num_heads, dropout, layer_id)
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.GELU(),
