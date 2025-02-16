@@ -2,23 +2,33 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
-from gpt import GPT
+import pandas as pd
+import numpy as np
+from GPT import GPT
 from embedding import embed_input
-from data_loader import load_random_text
+
+# Set device to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Load percent change values from file
+input_file = "Post Data/AAPL2Week.txt"
+data = pd.read_csv(input_file, header=None, names=["percent_change"])
+values = data["percent_change"].values
+
+# Create a vocabulary dictionary mapping each unique percent change to an index
+unique_values = np.unique(values)
+vocab_dict = {value: idx for idx, value in enumerate(unique_values)}
 
 # Training Configuration
-batch_size = 2
+batch_size = 1
 seq_len = 1024
-embed_dim = 1000
-vocab_size = 1001  # Matches embedding vocabulary
-num_epochs = 10  # Number of training iterations
+embed_dim = 1000  # Ensure it is a multiple of 8 for memory-efficient attention
+vocab_size = len(vocab_dict)  # Matches embedding vocabulary
+num_epochs = 1  # Number of training iterations
 learning_rate = 1e-4
 
-# Load vocabulary (replace with a real tokenizer's vocab)
-vocab_dict = {"hello": 5, "world": 23, "GPT": 87, "training": 150}  # Example vocab
-
 # Initialize model and optimizer
-gpt = GPT(embed_dim=embed_dim, vocab_size=vocab_size)
+gpt = GPT(embed_dim=embed_dim, vocab_size=vocab_size).to(device)
 optimizer = optim.Adam(gpt.parameters(), lr=learning_rate)
 loss_fn = nn.CrossEntropyLoss()
 
@@ -27,25 +37,32 @@ def load_attention_weights(model):
     for i, layer in enumerate(model.layers):
         weight_path = f"attention_weights/layer_{i}.pth"
         if os.path.exists(weight_path):
-            layer.attention.load_state_dict(torch.load(weight_path))
+            layer.attention.load_state_dict(torch.load(weight_path, map_location=device))
             print(f"✅ Loaded weights for Layer {i}")
         else:
             print(f"⚠️ No saved weights found for Layer {i}, using random initialization.")
 
 load_attention_weights(gpt)
 
+# Convert percent change values into token indices
+def get_tokenized_input(data, seq_len, vocab_dict):
+    indices = [vocab_dict[value] for value in data if value in vocab_dict]
+    if len(indices) < seq_len:
+        indices = indices + [0] * (seq_len - len(indices))  # Pad if needed
+    return torch.tensor(indices[:seq_len], dtype=torch.long, device=device)
+
 # Training Loop
 for epoch in range(num_epochs):
     print(f"\n🚀 Epoch {epoch + 1}/{num_epochs}")
 
-    # Load a random section of text and convert it to token indices
-    token_indices = load_random_text("dataset.txt", seq_len, vocab_dict)
+    # Prepare token indices for training
+    token_indices = get_tokenized_input(values, seq_len, vocab_dict).to(device)
 
-    # Ensure it has the correct batch size
-    token_indices = token_indices.unsqueeze(0).expand(batch_size, -1)  # (batch_size, seq_len)
+    # Ensure correct batch size
+    token_indices = token_indices.unsqueeze(0).expand(batch_size, -1).to(device)  # (batch_size, seq_len)
 
     # Convert to embeddings
-    embedded_tokens = embed_input(token_indices)
+    embedded_tokens = embed_input(token_indices).to(device)
 
     # Forward Pass
     logits, _, _ = gpt(embedded_tokens)
@@ -57,6 +74,13 @@ for epoch in range(num_epochs):
     # Compute Loss
     loss = loss_fn(logits, target)
     print(f"🎯 Loss: {loss.item()}")
+
+    # Print expected vs. actual output
+    predicted_indices = torch.argmax(logits, dim=-1)
+    expected_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in target.cpu().numpy()]
+    actual_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in predicted_indices.cpu().numpy()]
+    print(f"🟢 Expected: {expected_values[:10]}")  # Print first 10 values
+    print(f"🔴 Actual:   {actual_values[:10]}")
 
     # Backward Pass (Backpropagation)
     optimizer.zero_grad()
