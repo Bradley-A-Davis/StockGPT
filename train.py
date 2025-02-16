@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from GPT import GPT
 from embedding import embed_input
+import timeit
 
 # Set device to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -42,59 +43,71 @@ def load_attention_weights(model):
         else:
             print(f"⚠️ No saved weights found for Layer {i}, using random initialization.")
 
+def save_attention_weights(model):
+    os.makedirs("attention_weights", exist_ok=True)
+    for i, layer in enumerate(model.layers):
+        weight_path = f"attention_weights/layer_{i}.pth"
+        torch.save(layer.attention.state_dict(), weight_path)
+        print(f"💾 Saved updated weights for Layer {i}")
+
 load_attention_weights(gpt)
 
 # Convert percent change values into token indices
 def get_tokenized_input(data, seq_len, vocab_dict):
     indices = [vocab_dict[value] for value in data if value in vocab_dict]
-    if len(indices) < seq_len:
-        indices = indices + [0] * (seq_len - len(indices))  # Pad if needed
-    return torch.tensor(indices[:seq_len], dtype=torch.long, device=device)
+    return torch.tensor(indices, dtype=torch.long, device=device)
 
-# Training Loop
-for epoch in range(num_epochs):
-    print(f"\n🚀 Epoch {epoch + 1}/{num_epochs}")
+# Measure training time
+def train():
+    total_samples = len(values)
+    num_batches = total_samples // seq_len  # Calculate number of full sequences
 
-    # Prepare token indices for training
-    token_indices = get_tokenized_input(values, seq_len, vocab_dict).to(device)
+    for epoch in range(num_epochs):
+        print(f"\n🚀 Epoch {epoch + 1}/{num_epochs}")
 
-    # Ensure correct batch size
-    token_indices = token_indices.unsqueeze(0).expand(batch_size, -1).to(device)  # (batch_size, seq_len)
+        for batch in range(num_batches):
+            start_idx = batch * seq_len
+            end_idx = start_idx + seq_len
 
-    # Convert to embeddings
-    embedded_tokens = embed_input(token_indices).to(device)
+            if end_idx > total_samples:
+                break
 
-    # Forward Pass
-    logits, _, _ = gpt(embedded_tokens)
+            batch_values = values[start_idx:end_idx]  # Extract a sequence from the dataset
+            token_indices = get_tokenized_input(batch_values, seq_len, vocab_dict).to(device)
 
-    # Reshape logits for CrossEntropyLoss (batch_size * seq_len, vocab_size)
-    logits = logits.view(-1, vocab_size)
-    target = token_indices.view(-1)  # Target should have the same shape
+            # Ensure correct batch size
+            token_indices = token_indices.unsqueeze(0).expand(batch_size, -1).to(device)  # (batch_size, seq_len)
 
-    # Compute Loss
-    loss = loss_fn(logits, target)
-    print(f"🎯 Loss: {loss.item()}")
+            # Convert to embeddings
+            embedded_tokens = embed_input(token_indices).to(device)
 
-    # Print expected vs. actual output
-    predicted_indices = torch.argmax(logits, dim=-1)
-    expected_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in target.cpu().numpy()]
-    actual_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in predicted_indices.cpu().numpy()]
-    print(f"🟢 Expected: {expected_values[:10]}")  # Print first 10 values
-    print(f"🔴 Actual:   {actual_values[:10]}")
+            # Forward Pass
+            logits, _, _ = gpt(embedded_tokens)
 
-    # Backward Pass (Backpropagation)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+            # Reshape logits for CrossEntropyLoss (batch_size * seq_len, vocab_size)
+            logits = logits.view(-1, vocab_size)
+            target = token_indices.view(-1)  # Target should have the same shape
 
-    # Save Updated Weights
-    def save_attention_weights(model):
-        os.makedirs("attention_weights", exist_ok=True)
-        for i, layer in enumerate(model.layers):
-            weight_path = f"attention_weights/layer_{i}.pth"
-            torch.save(layer.attention.state_dict(), weight_path)
-            print(f"💾 Saved updated weights for Layer {i}")
+            # Compute Loss
+            loss = loss_fn(logits, target)
+            print(f"🎯 Loss: {loss.item()}")
 
-    save_attention_weights(gpt)
+            # Print expected vs. actual output
+            predicted_indices = torch.argmax(logits, dim=-1)
+            expected_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in target.cpu().numpy()]
+            actual_values = [list(vocab_dict.keys())[list(vocab_dict.values()).index(idx)] for idx in predicted_indices.cpu().numpy()]
+            print(f"🟢 Expected: {expected_values[:10]}")  # Print first 10 values
+            print(f"🔴 Actual:   {actual_values[:10]}")
+
+            # Backward Pass (Backpropagation)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        save_attention_weights(gpt)  # Save weights at the end of each epoch
+
+# Measure execution time using timeit
+time_taken = timeit.timeit(train, number=1)
+print(f"⏳ Total Training Time: {time_taken:.6f} seconds")
 
 print("\n✅ Training Complete! Model weights updated.")
