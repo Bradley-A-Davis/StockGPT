@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from flash_attn.flash_attn_interface import flash_attn_qkvpacked_func
+from xformers.ops import memory_efficient_attention
 import os
 
-class FlashAttentionBlock(nn.Module):
+class XFormersAttentionBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.1, layer_id=0):
         super().__init__()
         self.embed_dim = embed_dim
@@ -16,7 +16,7 @@ class FlashAttentionBlock(nn.Module):
         self.layer_norm = nn.LayerNorm(embed_dim)
 
         # Learnable weight for scaling attention outputs before passing to the next block
-        self.weight = nn.Parameter(torch.ones(1))  # Starts at 1, learnable
+        self.weight = nn.Parameter(torch.ones(1))
 
         # Cache storage for autoregressive inference
         self.cached_keys = None
@@ -46,11 +46,8 @@ class FlashAttentionBlock(nn.Module):
             self.cached_keys = K.detach()
             self.cached_values = V.detach()
 
-        # Stack Q, K, V for FlashAttention (better for backprop)
-        QKV = torch.stack([Q, K, V], dim=2)
-
-        # Apply FlashAttention with backprop support
-        attn_output = flash_attn_qkvpacked_func(QKV, dropout_p=self.dropout.p if self.training else 0.0, causal=False)
+        # Apply xFormers' memory-efficient attention
+        attn_output = memory_efficient_attention(Q, K, V, attn_bias=None)
 
         # Reshape back
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
@@ -69,5 +66,5 @@ class FlashAttentionBlock(nn.Module):
     def save_weights(self):
         """Saves the current attention weights to a file."""
         save_path = f"attention_weights/layer_{self.layer_id}.pth"
-        os.makedirs("attention_weights", exist_ok=True)  # Create directory if needed
+        os.makedirs("attention_weights", exist_ok=True)
         torch.save(self.state_dict(), save_path)

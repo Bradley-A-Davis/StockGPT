@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
-from attention import FlashAttentionBlock
 from embedding import embed_input, get_tokenized_input
 from positional_encoding import PositionalEncoding
 from decoder import GPTDecoder
+from attention import XFormersAttentionBlock
 
 class GPTBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout=0.1, layer_id=0):
         super().__init__()
-        self.attention = FlashAttentionBlock(embed_dim, num_heads, dropout, layer_id)
+        self.attention = XFormersAttentionBlock(embed_dim, num_heads, dropout, layer_id)
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.GELU(),
@@ -34,7 +34,7 @@ class GPTBlock(nn.Module):
         return x, cached_k, cached_v
 
 class GPT(nn.Module):
-    def __init__(self, embed_dim=1000, num_heads=10, ff_dim=4000, num_layers=12, vocab_size=1001, dropout=0.1, max_seq_len=98_280):
+    def __init__(self, embed_dim=1000, num_heads=10, ff_dim=4000, num_layers=25, vocab_size=1001, dropout=0.1, max_seq_len=98_280):
         super().__init__()
         self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
         self.layers = nn.ModuleList([GPTBlock(embed_dim, num_heads, ff_dim, dropout, layer_id=i) for i in range(num_layers)])
